@@ -36,31 +36,35 @@ Authorization: Basic dGVzdDp0b2tlbgo=
 
 ## ツールの導入
 
+```bash
+go get bitbucket.org/yujiorama/jira-timespent-report
+```
 
 ## 使い方
 
-* 検索条件は `TIS プロジェクトでクローズした課題`
-* 工数の単位は人日
-
 ```bash
-$ export AUTH_USER=user@example.net
-$ export AUTH_TOKEN=AKIAIOSFODNN7EXAMPLE
-$ jira-timespent-report.exe --url https://your-jira.atlassian.net/ --query 'project = TIS AND status = Closed' --unit 'day'
-キー,概要,初期見積もり,消費時間,Σ初期見積もり,Σ消費時間
-TIS-1,sample1,1.5,1.4,0,0
-TIS-2,sample2,1.0,1.2,0,0
-TIS-3,sample3,2.1,2.0,2.1,2.0
+$ jira-timespent-report -h
+Usage of jira-timespent-report:
+  -api string
+        number of API Version of Jira REST API (default "3")
+  -days int
+        work days per month (default 24)
+  -fields string
+        fields of jira issue (default "summary,status,timespent,timeoriginalestimate,aggregatetimespent,aggregatetimeoriginalestimate")
+  -filter string
+        jira search filter id
+  -hours int
+        work hours per day (default 8)
+  -maxresult int
+        max result for pagination (default 50)
+  -query string
+        jira query language expression (default "status = Closed AND updated >= startOfMonth(-1) AND updated <= endOfMonth(-1)")
+  -unit string
+        time unit format string (default "dd")
+  -url string
+        jira url (default "https://your-jira.atlassian.net")
 ```
 
-* 検索条件は `TIS プロジェクトでクローズした課題`
-* 工数の単位は人時
+## ライセンス
 
-```bash
-$ export AUTH_USER=user@example.net
-$ export AUTH_TOKEN=AKIAIOSFODNN7EXAMPLE
-$ jira-timespent-report.exe --url https://your-jira.atlassian.net/ --query 'project = TIS AND status = Closed' --unit 'hour'
-key,summary,timeoriginalestimate,timespent,aggregatetimeoriginalestimate,aggregatetimespent
-TIS-1,sample1,12.0,11.2,0,0
-TIS-2,sample2,8.0,9.6,0,0
-TIS-3,sample3,16.8,16.0,16.8,16.0
-```
+[MIT](./LICENSE)
