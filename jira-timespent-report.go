@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 )
 
@@ -45,16 +46,32 @@ var (
 	authToken     string
 	jiraURL       string
 	jiraQuery     string
+	jiraFields    []string
 	jiraMaxResult int
 	timeUnit      string
+
+	jiraIssueFieldLabel = map[string]string{
+		"summary":                       "概要",
+		"status":                        "ステータス",
+		"timeoriginalestimate":          "初期見積もり",
+		"timespent":                     "消費時間",
+		"aggregatetimeoriginalestimate": "Σ初期見積もり",
+		"aggregatetimespent":            "Σ消費時間",
+	}
 )
+
+type status struct {
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+}
 
 type issueField struct {
 	Summary                       string `json:"summary"`
 	Timespent                     int    `json:"timespent"`
 	Timeoriginalestimate          int    `json:"timeoriginalestimate"`
-	AggregateTimespent            int    `json:"aggregatetimespent"`
-	AggregateTimeoriginalestimate int    `json:"aggregatetimeoriginalestimate"`
+	Aggregatetimespent            int    `json:"aggregatetimespent"`
+	Aggregatetimeoriginalestimate int    `json:"aggregatetimeoriginalestimate"`
+	Status                        status `json:"status,omitempty"`
 }
 
 type issue struct {
@@ -64,25 +81,28 @@ type issue struct {
 }
 
 type searchResult struct {
-	StartAt int     `json:"startAt"`
+	Startat int     `json:"startAt"`
 	Total   int     `json:"total"`
 	Issues  []issue `json:"issues"`
 }
 
 func init() {
+	flag.StringVar(&jiraURL, "url", "https://your-jira.atlassian.net", "jira url")
+	flag.StringVar(&jiraQuery, "query", "status = Closed", "jira query language expression")
+	var fields string
+	flag.StringVar(&fields, "fields", "summary,status,timespent,timeoriginalestimate,aggregatetimespent,aggregatetimeoriginalestimate", "fields of jira issue")
+	jiraFields = strings.Split(fields, ",")
+	flag.IntVar(&jiraMaxResult, "maxresult", defaultMaxResult, "max result for pagination")
+	flag.StringVar(&timeUnit, "unit", "dd", "time unit format string")
+}
+
+func main() {
 	authUser = os.Getenv("AUTH_USER")
 	authToken = os.Getenv("AUTH_TOKEN")
 	if len(authUser) == 0 || len(authToken) == 0 {
 		panic("環境変数 AUTH_USER/AUTH_TOKEN が未定義")
 	}
 
-	flag.StringVar(&jiraURL, "url", "https://your-jira.atlassian.net", "jira url")
-	flag.StringVar(&jiraQuery, "query", "status = Closed", "jira query language expression")
-	flag.IntVar(&jiraMaxResult, "maxresult", defaultMaxResult, "max result for pagination")
-	flag.StringVar(&timeUnit, "unit", "dd", "time unit format string")
-}
-
-func main() {
 	flag.Usage = func() {
 		fmt.Println(usageText)
 	}
@@ -91,7 +111,7 @@ func main() {
 
 	results := make([]searchResult, 0, 10)
 	for requireNext(results) {
-		result := doSearch(lastPosition(results))
+		result := search(lastPosition(results))
 		results = append(results, result)
 	}
 
@@ -106,10 +126,10 @@ func lastPosition(results []searchResult) int {
 		return 0
 	}
 
-	return results[len(results)-1].StartAt + len(results[len(results)-1].Issues)
+	return results[len(results)-1].Startat + len(results[len(results)-1].Issues)
 }
 
-func doSearch(startAt int) searchResult {
+func search(startAt int) searchResult {
 
 	searchURL, err := url.Parse(jiraURL)
 	if err != nil {
@@ -118,10 +138,8 @@ func doSearch(startAt int) searchResult {
 	searchURL.Path = "/rest/api/2/search"
 
 	searchRequest := map[string]interface{}{
-		"jql": jiraQuery,
-		"fields": []string{
-			"summary", "timespent", "timeoriginalestimate", "aggregatetimespent", "aggregatetimeoriginalestimate",
-		},
+		"jql":        jiraQuery,
+		"fields":     jiraFields,
 		"startAt":    startAt,
 		"maxResults": jiraMaxResult,
 	}
@@ -174,25 +192,23 @@ func requireNext(results []searchResult) bool {
 }
 
 func renderCsv(results []searchResult) {
-	log.Println(len(results))
-	header := []string{
-		"キー", "概要", "初期見積もり", "消費時間", "Σ初期見積もり", "Σ消費時間",
+
+	fieldLabels := []string{"キー"}
+	for _, field := range jiraFields {
+		label := field
+		if text, ok := jiraIssueFieldLabel[label]; ok {
+			label = text
+		}
+		fieldLabels = append(fieldLabels, label)
 	}
 	writer := csv.NewWriter(os.Stdout)
-	if err := writer.Write(header); err != nil {
+	if err := writer.Write(fieldLabels); err != nil {
 		log.Fatalf("writer.Write error: %v\n", err)
 	}
 
 	for _, result := range results {
 		for _, issue := range result.Issues {
-			record := []string{
-				issue.Key,
-				issue.Fields.Summary,
-				convert(issue.Fields.Timeoriginalestimate),
-				convert(issue.Fields.Timespent),
-				convert(issue.Fields.AggregateTimeoriginalestimate),
-				convert(issue.Fields.AggregateTimespent),
-			}
+			record := issue.ToRecord(jiraFields)
 			if err := writer.Write(record); err != nil {
 				log.Fatalf("writer.Write error: %v\n", err)
 			}
@@ -205,17 +221,56 @@ func renderCsv(results []searchResult) {
 	}
 }
 
-func convert(second int) string {
+func (i *issue) ToRecord(fields []string) []string {
 
-	var v float32
-	switch strings.ToLower(timeUnit) {
-	case "hh":
-		v = float32(second) / 60 / 60
-	case "dd":
-		v = float32(second) / 60 / 60 / hourOfDay
-	case "mm":
-		v = float32(second) / 60 / 60 / hourOfDay / dayOfMonth
+	result := []string{i.Key}
+	for _, x := range i.Fields.ToRecord(fields) {
+		result = append(result, x)
+	}
+	return result
+}
+
+func (f *issueField) ToRecord(fields []string) []string {
+
+	var result []string
+
+	st := reflect.ValueOf(*f)
+	for _, fieldName := range fields {
+		v := ""
+
+		structFieldName := strings.ToUpper(fieldName[:1]) + strings.ToLower(fieldName[1:])
+		if field := st.FieldByName(structFieldName); field.IsValid() {
+			switch fieldName {
+			case "timespent", "timeoriginalestimate", "aggregatetimespent", "aggregatetimeoriginalestimate":
+				second := int(field.Int())
+				var t float32
+				switch strings.ToLower(timeUnit) {
+				case "hh":
+					t = float32(second) / 60 / 60
+				case "dd":
+					t = float32(second) / 60 / 60 / hourOfDay
+				case "mm":
+					t = float32(second) / 60 / 60 / hourOfDay / dayOfMonth
+				}
+				v = fmt.Sprintf("%.2f", t)
+
+			case "status":
+				v = f.Status.Name
+
+			default:
+				switch field.Kind() {
+				case reflect.String:
+					v = field.String()
+				case reflect.Int:
+					v = fmt.Sprintf("%d", field.Int())
+				case reflect.Float32:
+					v = fmt.Sprintf("%f", field.Float())
+				}
+			}
+		}
+
+		result = append(result, v)
 	}
 
-	return fmt.Sprintf("%.2f", v)
+	return result
 }
