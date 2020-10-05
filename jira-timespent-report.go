@@ -97,16 +97,17 @@ func init() {
 }
 
 func main() {
+	flag.Usage = func() {
+		fmt.Println(usageText)
+	}
+	flag.Parse()
+
 	authUser = os.Getenv("AUTH_USER")
 	authToken = os.Getenv("AUTH_TOKEN")
 	if len(authUser) == 0 || len(authToken) == 0 {
 		panic("環境変数 AUTH_USER/AUTH_TOKEN が未定義")
 	}
 
-	flag.Usage = func() {
-		fmt.Println(usageText)
-	}
-	flag.Parse()
 	log.Println("start")
 
 	results := make([]searchResult, 0, 10)
