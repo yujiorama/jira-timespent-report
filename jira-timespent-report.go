@@ -46,6 +46,7 @@ var (
 	authToken     string
 	jiraURL       string
 	jiraQuery     string
+	jiraFilter    string
 	jiraFields    []string
 	jiraMaxResult int
 	timeUnit      string
@@ -88,7 +89,8 @@ type searchResult struct {
 
 func init() {
 	flag.StringVar(&jiraURL, "url", "https://your-jira.atlassian.net", "jira url")
-	flag.StringVar(&jiraQuery, "query", "status = Closed", "jira query language expression")
+	flag.StringVar(&jiraQuery, "query", "status = Closed AND updated >= startOfMonth(-1) AND updated <= endOfMonth(-1)", "jira query language expression")
+	flag.StringVar(&jiraFilter, "filter", "", "jira search filter id")
 	var fields string
 	flag.StringVar(&fields, "fields", "summary,status,timespent,timeoriginalestimate,aggregatetimespent,aggregatetimeoriginalestimate", "fields of jira issue")
 	jiraFields = strings.Split(fields, ",")
@@ -130,28 +132,54 @@ func lastPosition(results []searchResult) int {
 	return results[len(results)-1].Startat + len(results[len(results)-1].Issues)
 }
 
-func search(startAt int) searchResult {
+func getFilterJql(baseURL url.URL) (string, bool) {
 
-	searchURL, err := url.Parse(jiraURL)
+	filterURL := baseURL
+	filterURL.Path = fmt.Sprintf("/rest/api/2/filter/%s", jiraFilter)
+	req, err := http.NewRequest("GET", filterURL.String(), nil)
 	if err != nil {
-		log.Fatalf("url.Parse error: %v\n", err)
+		log.Printf("http.NewRequest: error %v\n", err)
+		return "", false
 	}
-	searchURL.Path = "/rest/api/2/search"
 
-	searchRequest := map[string]interface{}{
-		"jql":        jiraQuery,
-		"fields":     jiraFields,
-		"startAt":    startAt,
-		"maxResults": jiraMaxResult,
+	req.Header.Set("Authorization", fmt.Sprintf("Basic %s", base64.URLEncoding.EncodeToString([]byte(authUser+":"+authToken))))
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("client.Do: error %v\n", err)
+		return "", false
 	}
+	defer resp.Body.Close()
+
+	responseBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("ioutil.ReadAll: error %v\n", err)
+		return "", false
+	}
+	var result struct {
+		Jql string `json:"jql"`
+	}
+	if err := json.Unmarshal(responseBody, &result); err != nil {
+		log.Printf("json.Unmarshal: error %v\n", err)
+		return "", false
+	}
+
+	return result.Jql, true
+}
+
+func getSearchResult(baseURL url.URL, searchRequest map[string]interface{}) (*searchResult, error) {
+	log.Println(searchRequest)
 	requestBody, err := json.Marshal(searchRequest)
 	if err != nil {
-		log.Fatalf("json.Marshal error: %v\n", err)
+		return nil, err
 	}
-
+	searchURL := baseURL
+	searchURL.Path = "/rest/api/2/search"
 	req, err := http.NewRequest("POST", searchURL.String(), bytes.NewBuffer(requestBody))
 	if err != nil {
-		log.Fatalf("http.NewRequest error: %v\n", err)
+		return nil, err
 	}
 
 	req.Header.Set("Authorization", fmt.Sprintf("Basic %s", base64.URLEncoding.EncodeToString([]byte(authUser+":"+authToken))))
@@ -161,20 +189,49 @@ func search(startAt int) searchResult {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Fatalf("client.Do error: %v\n", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	var result searchResult
 	responseBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("ioutil.ReadAll error: %v\n", err)
+		return nil, err
 	}
 	if err := json.Unmarshal(responseBody, &result); err != nil {
-		log.Fatalf("decoder.Decode error: %v\n", err)
+		return nil, err
 	}
 
-	return result
+	return &result, nil
+}
+
+func search(startAt int) searchResult {
+
+	baseURL, err := url.Parse(jiraURL)
+	if err != nil {
+		log.Fatalf("url.Parse error: %v\n", err)
+	}
+
+	searchRequest := map[string]interface{}{
+		"fields":     jiraFields,
+		"startAt":    startAt,
+		"maxResults": jiraMaxResult,
+	}
+	if len(jiraQuery) > 0 {
+		searchRequest["jql"] = jiraQuery
+	}
+	if len(jiraFilter) > 0 {
+		if filterQuery, ok := getFilterJql(*baseURL); ok {
+			searchRequest["jql"] = filterQuery
+		}
+	}
+
+	result, err := getSearchResult(*baseURL, searchRequest)
+	if err != nil {
+		log.Fatalf("getSearchResult: error %v\n", err)
+	}
+
+	return *result
 }
 
 func requireNext(results []searchResult) bool {
