@@ -13,13 +13,15 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 )
 
 const (
-	defaultMaxResult = 50
-	hourOfDay        = 8
-	dayOfMonth       = 24
+	defaultMaxResult          = 50
+	defaultHoursPerDay        = 8
+	defaultDaysPerMonth       = 24
+	defaultJiraRestApiVersion = "3"
 	usageText                 = `Usage of jira-timespent-report:
   -api string
         number of API Version of Jira REST API (default "3")
@@ -42,14 +44,17 @@ const (
 )
 
 var (
-	authUser      string
-	authToken     string
-	jiraURL       string
-	jiraQuery     string
-	jiraFilter    string
-	jiraFields    []string
-	jiraMaxResult int
-	timeUnit      string
+	authUser       string
+	authToken      string
+	jiraURL        string
+	jiraQuery      string
+	jiraFilter     string
+	jiraFields     []string
+	jiraMaxResult  int
+	jiraApiVersion string
+	timeUnit       string
+	hoursPerDay    int
+	daysPerMonth   int
 
 	jiraIssueFieldLabel = map[string]string{
 		"summary":                       "概要",
@@ -81,10 +86,13 @@ type issue struct {
 	Fields issueField `json:"fields"`
 }
 
+type issues []issue
+
 type searchResult struct {
-	Startat int     `json:"startAt"`
-	Total   int     `json:"total"`
-	Issues  []issue `json:"issues"`
+	StartAt    int    `json:"startAt"`
+	Total      int    `json:"total"`
+	Issues     issues `json:"issues"`
+	MaxResults int    `json:"maxResults"`
 }
 
 func init() {
@@ -95,7 +103,10 @@ func init() {
 	flag.StringVar(&fields, "fields", "summary,status,timespent,timeoriginalestimate,aggregatetimespent,aggregatetimeoriginalestimate", "fields of jira issue")
 	jiraFields = strings.Split(fields, ",")
 	flag.IntVar(&jiraMaxResult, "maxresult", defaultMaxResult, "max result for pagination")
+	flag.StringVar(&jiraApiVersion, "api", defaultJiraRestApiVersion, "number of API Version of Jira REST API")
 	flag.StringVar(&timeUnit, "unit", "dd", "time unit format string")
+	flag.IntVar(&hoursPerDay, "hours", defaultHoursPerDay, "work hours per day")
+	flag.IntVar(&daysPerMonth, "days", defaultDaysPerMonth, "work days per month")
 }
 
 func main() {
@@ -113,170 +124,22 @@ func main() {
 	log.Println("start")
 
 	results := make([]searchResult, 0, 10)
-	for requireNext(results) {
-		result := search(lastPosition(results))
-		results = append(results, result)
+	firstResult := <-searchCh(1, 1)
+	if firstResult != nil {
+		if firstResult.isNotEmpty() {
+			results = append(results, *firstResult)
+		}
+
+		if firstResult.hasNextPage() {
+			for result := range searchCh(firstResult.nextPage(), firstResult.lastPage()) {
+				results = append(results, *result)
+			}
+		}
 	}
 
 	renderCsv(results)
 
 	log.Println("end")
-}
-
-func lastPosition(results []searchResult) int {
-
-	if len(results) == 0 {
-		return 0
-	}
-
-	return results[len(results)-1].Startat + len(results[len(results)-1].Issues)
-}
-
-func getFilterJql(baseURL url.URL) (string, bool) {
-
-	filterURL := baseURL
-	filterURL.Path = fmt.Sprintf("/rest/api/2/filter/%s", jiraFilter)
-	req, err := http.NewRequest("GET", filterURL.String(), nil)
-	if err != nil {
-		log.Printf("http.NewRequest: error %v\n", err)
-		return "", false
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Basic %s", base64.URLEncoding.EncodeToString([]byte(authUser+":"+authToken))))
-	req.Header.Set("Accept", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("client.Do: error %v\n", err)
-		return "", false
-	}
-	defer resp.Body.Close()
-
-	responseBody, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		log.Printf("ioutil.ReadAll: error %v\n", err)
-		return "", false
-	}
-	var result struct {
-		Jql string `json:"jql"`
-	}
-	if err := json.Unmarshal(responseBody, &result); err != nil {
-		log.Printf("json.Unmarshal: error %v\n", err)
-		return "", false
-	}
-
-	return result.Jql, true
-}
-
-func getSearchResult(baseURL url.URL, searchRequest map[string]interface{}) (*searchResult, error) {
-	log.Println(searchRequest)
-	requestBody, err := json.Marshal(searchRequest)
-	if err != nil {
-		return nil, err
-	}
-	searchURL := baseURL
-	searchURL.Path = "/rest/api/2/search"
-	req, err := http.NewRequest("POST", searchURL.String(), bytes.NewBuffer(requestBody))
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Basic %s", base64.URLEncoding.EncodeToString([]byte(authUser+":"+authToken))))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var result searchResult
-	responseBody, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(responseBody, &result); err != nil {
-		return nil, err
-	}
-
-	return &result, nil
-}
-
-func search(startAt int) searchResult {
-
-	baseURL, err := url.Parse(jiraURL)
-	if err != nil {
-		log.Fatalf("url.Parse error: %v\n", err)
-	}
-
-	searchRequest := map[string]interface{}{
-		"fields":     jiraFields,
-		"startAt":    startAt,
-		"maxResults": jiraMaxResult,
-	}
-	if len(jiraQuery) > 0 {
-		searchRequest["jql"] = jiraQuery
-	}
-	if len(jiraFilter) > 0 {
-		if filterQuery, ok := getFilterJql(*baseURL); ok {
-			searchRequest["jql"] = filterQuery
-		}
-	}
-
-	result, err := getSearchResult(*baseURL, searchRequest)
-	if err != nil {
-		log.Fatalf("getSearchResult: error %v\n", err)
-	}
-
-	return *result
-}
-
-func requireNext(results []searchResult) bool {
-
-	if len(results) == 0 {
-		return true
-	}
-
-	var numberOfIssues int
-
-	for _, result := range results {
-		numberOfIssues += len(result.Issues)
-	}
-
-	return numberOfIssues != results[0].Total
-}
-
-func renderCsv(results []searchResult) {
-
-	fieldLabels := []string{"キー"}
-	for _, field := range jiraFields {
-		label := field
-		if text, ok := jiraIssueFieldLabel[label]; ok {
-			label = text
-		}
-		fieldLabels = append(fieldLabels, label)
-	}
-	writer := csv.NewWriter(os.Stdout)
-	if err := writer.Write(fieldLabels); err != nil {
-		log.Fatalf("writer.Write error: %v\n", err)
-	}
-
-	for _, result := range results {
-		for _, issue := range result.Issues {
-			record := issue.ToRecord(jiraFields)
-			if err := writer.Write(record); err != nil {
-				log.Fatalf("writer.Write error: %v\n", err)
-			}
-		}
-	}
-
-	writer.Flush()
-	if err := writer.Error(); err != nil {
-		log.Fatalf("writer.Error error: %v\n", err)
-	}
 }
 
 func (i *issue) ToRecord(fields []string) []string {
@@ -303,12 +166,12 @@ func (f *issueField) ToRecord(fields []string) []string {
 				second := int(field.Int())
 				var t float32
 				switch strings.ToLower(timeUnit) {
-				case "hh":
-					t = float32(second) / 60 / 60
-				case "dd":
-					t = float32(second) / 60 / 60 / hourOfDay
-				case "mm":
-					t = float32(second) / 60 / 60 / hourOfDay / dayOfMonth
+				case "h", "hh":
+					t = float32(second) / float32(60*60)
+				case "d", "dd":
+					t = float32(second) / float32(60*60*hoursPerDay)
+				case "m", "mm":
+					t = float32(second) / float32(60*60*hoursPerDay*daysPerMonth)
 				}
 				v = fmt.Sprintf("%.2f", t)
 
@@ -331,4 +194,207 @@ func (f *issueField) ToRecord(fields []string) []string {
 	}
 
 	return result
+}
+
+func (r *searchResult) isNotEmpty() bool {
+
+	return r.Total > 0 && len(r.Issues) > 0
+}
+
+func (r *searchResult) hasNextPage() bool {
+
+	return r.currentPage() < r.lastPage()
+}
+
+func (r *searchResult) currentPage() int {
+
+	return r.StartAt/r.MaxResults + 1
+}
+
+func (r *searchResult) lastPage() int {
+
+	return r.Total/r.MaxResults + 1
+}
+
+func (r *searchResult) nextPage() int {
+
+	return r.currentPage() + 1
+}
+
+func (a issues) Len() int {
+
+	return len(a)
+}
+
+func (a issues) Swap(i, j int) {
+
+	a[i], a[j] = a[j], a[i]
+}
+
+func (a issues) Less(i, j int) bool {
+
+	return a[i].Key < a[j].Key
+}
+
+func getFilterJql(baseURL url.URL) (string, bool) {
+
+	filterURL := baseURL
+	filterURL.Path = fmt.Sprintf("/rest/api/%s/filter/%s", jiraApiVersion, jiraFilter)
+	req, err := http.NewRequest("GET", filterURL.String(), nil)
+	if err != nil {
+		log.Printf("http.NewRequest error: %v\nfilterURL=[%v]\n", err, filterURL)
+		return "", false
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Basic %s", base64.URLEncoding.EncodeToString([]byte(authUser+":"+authToken))))
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("client.Do error: %v\nreq=[%v]\n", err, req)
+		return "", false
+	}
+	defer resp.Body.Close()
+
+	responseBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("ioutil.ReadAll error: %v\nresp.Body=[%v]\n", err, resp.Body)
+		return "", false
+	}
+	var result struct {
+		Jql string `json:"jql"`
+	}
+	if err := json.Unmarshal(responseBody, &result); err != nil {
+		log.Printf("json.Unmarshal error: %v\nresponseBody=[%v]\n", err, responseBody)
+		return "", false
+	}
+
+	return result.Jql, true
+}
+
+func getSearchResult(baseURL url.URL, searchRequest map[string]interface{}) (*searchResult, error) {
+
+	requestBody, err := json.Marshal(searchRequest)
+	if err != nil {
+		return nil, fmt.Errorf("json.Marshal error: %v\nsearchRequest=[%v]", err, searchRequest)
+	}
+	searchURL := baseURL
+	searchURL.Path = fmt.Sprintf("/rest/api/%s/search", jiraApiVersion)
+	req, err := http.NewRequest("POST", searchURL.String(), bytes.NewBuffer(requestBody))
+	if err != nil {
+		return nil, fmt.Errorf("http.NewRequest error: %v\nsearchURL=[%v],requestBody=[%v]",
+			err, searchURL, requestBody)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Basic %s", base64.URLEncoding.EncodeToString([]byte(authUser+":"+authToken))))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("client.Do error: %v\nreq=[%v]", err, req)
+	}
+	defer resp.Body.Close()
+
+	var result searchResult
+	responseBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("ioutil.ReadAll error: %v\nresp.Body=[%v]", err, resp.Body)
+	}
+	if err := json.Unmarshal(responseBody, &result); err != nil {
+		return nil, fmt.Errorf("json.Unmarshal error: %v\nresponseBody=[%v]", err, responseBody)
+	}
+
+	return &result, nil
+}
+
+func searchCh(pageFromInclusive int, pageToInclusive int) <-chan *searchResult {
+
+	results := make(chan *searchResult, 10)
+	defer close(results)
+
+	for page := pageFromInclusive; page <= pageToInclusive; page++ {
+
+		startAt := (page - 1) * jiraMaxResult
+		result, err := search(startAt)
+		if err != nil {
+			log.Printf("search error: %v\nstartAt=[%v]\n", err, startAt)
+			continue
+		}
+		results <- result
+	}
+
+	return results
+}
+
+func search(startAt int) (*searchResult, error) {
+
+	baseURL, err := url.Parse(jiraURL)
+	if err != nil {
+		return nil, fmt.Errorf("url.Parse error: %v\njiraURL=[%v]", err, jiraURL)
+	}
+
+	searchRequest := map[string]interface{}{
+		"fields":     jiraFields,
+		"startAt":    startAt,
+		"maxResults": jiraMaxResult,
+	}
+	if len(jiraQuery) > 0 {
+		searchRequest["jql"] = jiraQuery
+	}
+	if len(jiraFilter) > 0 {
+		if filterQuery, ok := getFilterJql(*baseURL); ok {
+			searchRequest["jql"] = filterQuery
+		}
+	}
+
+	result, err := getSearchResult(*baseURL, searchRequest)
+	if err != nil {
+		return nil, fmt.Errorf("getSearchResult error: %v\nbaseURL=[%v], searchRequest=[%v]",
+			err, baseURL, searchResult{})
+	}
+
+	if !result.isNotEmpty() {
+		return nil, fmt.Errorf("empty result")
+	}
+
+	return result, nil
+}
+
+func renderCsv(results []searchResult) {
+
+	fieldLabels := []string{"キー"}
+	for _, field := range jiraFields {
+		label := field
+		if text, ok := jiraIssueFieldLabel[label]; ok {
+			label = text
+		}
+		fieldLabels = append(fieldLabels, label)
+	}
+	writer := csv.NewWriter(os.Stdout)
+	if err := writer.Write(fieldLabels); err != nil {
+		log.Fatalf("writer.Write error: %v\nfieldLabels=[%v]\n", err, fieldLabels)
+	}
+
+	allIssues := make(issues, 0, 10)
+	for _, result := range results {
+		for _, issue := range result.Issues {
+			allIssues = append(allIssues, issue)
+		}
+	}
+	sort.Sort(allIssues)
+
+	for _, issue := range allIssues {
+		record := issue.ToRecord(jiraFields)
+		if err := writer.Write(record); err != nil {
+			log.Fatalf("writer.Write error: %v\nrecord=[%v]\n", err, record)
+		}
+	}
+
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		log.Fatalf("writer.Error error: %v\n", err)
+	}
 }
