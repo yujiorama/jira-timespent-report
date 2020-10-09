@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 )
 
 const (
@@ -123,15 +124,24 @@ func main() {
 
 	log.Println("start")
 
+	resultCh, errorCh := searchCh(1, 1, jiraMaxResult)
+	if err := <-errorCh; err != nil {
+		log.Printf("%v\n", err)
+	}
+	firstResult := <-resultCh
+
 	results := make([]searchResult, 0, 10)
-	firstResult := <-searchCh(1, 1)
 	if firstResult != nil {
 		if firstResult.isNotEmpty() {
 			results = append(results, *firstResult)
 		}
 
 		if firstResult.hasNextPage() {
-			for result := range searchCh(firstResult.nextPage(), firstResult.lastPage()) {
+			resultCh, errorCh := searchCh(firstResult.nextPage(), firstResult.lastPage(), firstResult.MaxResults)
+			for err := range errorCh {
+				log.Printf("%v\n", err)
+			}
+			for result := range resultCh {
 				results = append(results, *result)
 			}
 		}
@@ -310,23 +320,31 @@ func getSearchResult(baseURL url.URL, searchRequest map[string]interface{}) (*se
 	return &result, nil
 }
 
-func searchCh(pageFromInclusive int, pageToInclusive int) <-chan *searchResult {
+func searchCh(pageFromInclusive int, pageToInclusive int, issuesPerPage int) (<-chan *searchResult, <-chan error) {
 
-	results := make(chan *searchResult, 10)
-	defer close(results)
+	resultCh := make(chan *searchResult, 10)
+	defer close(resultCh)
+	errorCh := make(chan error, 10)
+	defer close(errorCh)
 
+	var wg sync.WaitGroup
 	for page := pageFromInclusive; page <= pageToInclusive; page++ {
+		wg.Add(1)
+		startAt := (page - 1) * issuesPerPage
 
-		startAt := (page - 1) * jiraMaxResult
-		result, err := search(startAt)
-		if err != nil {
-			log.Printf("search error: %v\nstartAt=[%v]\n", err, startAt)
-			continue
-		}
-		results <- result
+		go func(startAt int, resultCh chan<- *searchResult, errorCh chan<- error, wg *sync.WaitGroup) {
+			defer wg.Done()
+			result, err := search(startAt)
+			if err != nil {
+				errorCh <- fmt.Errorf("search error: %v\nstartAt=[%v]", err, startAt)
+			} else {
+				resultCh <- result
+			}
+		}(startAt, resultCh, errorCh, &wg)
 	}
+	defer wg.Wait()
 
-	return results
+	return resultCh, errorCh
 }
 
 func search(startAt int) (*searchResult, error) {
@@ -350,6 +368,7 @@ func search(startAt int) (*searchResult, error) {
 		}
 	}
 
+	log.Printf("search: startAt=[%v]\n", startAt)
 	result, err := getSearchResult(*baseURL, searchRequest)
 	if err != nil {
 		return nil, fmt.Errorf("getSearchResult error: %v\nbaseURL=[%v], searchRequest=[%v]",
