@@ -124,7 +124,7 @@ func main() {
 
 	log.Println("start")
 
-	resultCh, errorCh := searchCh(1, 1, jiraMaxResult)
+	resultCh, errorCh := searchCh([]int{1}, jiraMaxResult)
 	if err := <-errorCh; err != nil {
 		log.Printf("%v\n", err)
 	}
@@ -136,14 +136,12 @@ func main() {
 			results = append(results, *firstResult)
 		}
 
-		if firstResult.hasNextPage() {
-			resultCh, errorCh := searchCh(firstResult.nextPage(), firstResult.lastPage(), firstResult.MaxResults)
-			for err := range errorCh {
-				log.Printf("%v\n", err)
-			}
-			for result := range resultCh {
-				results = append(results, *result)
-			}
+		resultCh, errorCh := searchCh(firstResult.restPages(), firstResult.MaxResults)
+		for err := range errorCh {
+			log.Printf("%v\n", err)
+		}
+		for result := range resultCh {
+			results = append(results, *result)
 		}
 	}
 
@@ -211,24 +209,17 @@ func (r *searchResult) isNotEmpty() bool {
 	return r.Total > 0 && len(r.Issues) > 0
 }
 
-func (r *searchResult) hasNextPage() bool {
+func (r *searchResult) restPages() []int {
 
-	return r.currentPage() < r.lastPage()
-}
+	current := r.StartAt/r.MaxResults + 1
+	next := current + 1
+	last := r.Total/r.MaxResults + 1
 
-func (r *searchResult) currentPage() int {
-
-	return r.StartAt/r.MaxResults + 1
-}
-
-func (r *searchResult) lastPage() int {
-
-	return r.Total/r.MaxResults + 1
-}
-
-func (r *searchResult) nextPage() int {
-
-	return r.currentPage() + 1
+	pages := make([]int, 0, 10)
+	for page := next; page <= last; page++ {
+		pages = append(pages, page)
+	}
+	return pages
 }
 
 func (a issues) Len() int {
@@ -246,10 +237,10 @@ func (a issues) Less(i, j int) bool {
 	return a[i].Key < a[j].Key
 }
 
-func getFilterJql(baseURL url.URL) (string, bool) {
+func getFilterJql(baseURL url.URL, filterID string) (string, bool) {
 
 	filterURL := baseURL
-	filterURL.Path = fmt.Sprintf("/rest/api/%s/filter/%s", jiraApiVersion, jiraFilter)
+	filterURL.Path = fmt.Sprintf("/rest/api/%s/filter/%s", jiraApiVersion, filterID)
 	req, err := http.NewRequest("GET", filterURL.String(), nil)
 	if err != nil {
 		log.Printf("http.NewRequest error: %v\nfilterURL=[%v]\n", err, filterURL)
@@ -320,7 +311,7 @@ func getSearchResult(baseURL url.URL, searchRequest map[string]interface{}) (*se
 	return &result, nil
 }
 
-func searchCh(pageFromInclusive int, pageToInclusive int, issuesPerPage int) (<-chan *searchResult, <-chan error) {
+func searchCh(pages []int, issuesPerPage int) (<-chan *searchResult, <-chan error) {
 
 	resultCh := make(chan *searchResult, 10)
 	defer close(resultCh)
@@ -328,7 +319,8 @@ func searchCh(pageFromInclusive int, pageToInclusive int, issuesPerPage int) (<-
 	defer close(errorCh)
 
 	var wg sync.WaitGroup
-	for page := pageFromInclusive; page <= pageToInclusive; page++ {
+	defer wg.Wait()
+	for _, page := range pages {
 		wg.Add(1)
 		startAt := (page - 1) * issuesPerPage
 
@@ -337,12 +329,13 @@ func searchCh(pageFromInclusive int, pageToInclusive int, issuesPerPage int) (<-
 			result, err := search(startAt)
 			if err != nil {
 				errorCh <- fmt.Errorf("search error: %v\nstartAt=[%v]", err, startAt)
-			} else {
+			}
+
+			if result.isNotEmpty() {
 				resultCh <- result
 			}
 		}(startAt, resultCh, errorCh, &wg)
 	}
-	defer wg.Wait()
 
 	return resultCh, errorCh
 }
@@ -363,7 +356,7 @@ func search(startAt int) (*searchResult, error) {
 		searchRequest["jql"] = jiraQuery
 	}
 	if len(jiraFilter) > 0 {
-		if filterQuery, ok := getFilterJql(*baseURL); ok {
+		if filterQuery, ok := getFilterJql(*baseURL, jiraFilter); ok {
 			searchRequest["jql"] = filterQuery
 		}
 	}
