@@ -67,6 +67,18 @@ var (
 	}
 )
 
+var (
+	appHashInstance = appHash{
+		mutex: &sync.Mutex{},
+		memo:  map[string]interface{}{},
+	}
+)
+
+type appHash struct {
+	mutex *sync.Mutex
+	memo  map[string]interface{}
+}
+
 type status struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -237,7 +249,26 @@ func (a issues) Less(i, j int) bool {
 	return a[i].Key < a[j].Key
 }
 
+func (c appHash) put(k string, v interface{}) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.memo[k] = v
+}
+
+func (c appHash) get(k string) (interface{}, bool) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	v, ok := c.memo[k]
+	return v, ok
+}
+
 func getFilterJql(baseURL url.URL, filterID string) (string, bool) {
+
+	cacheKey := fmt.Sprintf("getFilterJql_%s", filterID)
+	if v, ok := appHashInstance.get(cacheKey); ok {
+		log.Printf("cache hit: key=[%s], v=[%v]\n", cacheKey, v)
+		return v.(string), true
+	}
 
 	filterURL := baseURL
 	filterURL.Path = fmt.Sprintf("/rest/api/%s/filter/%s", jiraApiVersion, filterID)
@@ -271,14 +302,17 @@ func getFilterJql(baseURL url.URL, filterID string) (string, bool) {
 		return "", false
 	}
 
+	appHashInstance.put(cacheKey, result.Jql)
 	return result.Jql, true
 }
 
-func getSearchResult(baseURL url.URL, searchRequest map[string]interface{}) (*searchResult, error) {
+func getSearchResult(baseURL url.URL, requestBody []byte) (*searchResult, error) {
 
-	requestBody, err := json.Marshal(searchRequest)
-	if err != nil {
-		return nil, fmt.Errorf("json.Marshal error: %v\nsearchRequest=[%v]", err, searchRequest)
+	cacheKey := fmt.Sprintf("getSearchResult_%s", string(requestBody))
+	if v, ok := appHashInstance.get(cacheKey); ok {
+		log.Printf("cache hit: key=[%s], v=[%v]\n", cacheKey, v)
+		result := v.(searchResult)
+		return &result, nil
 	}
 	searchURL := baseURL
 	searchURL.Path = fmt.Sprintf("/rest/api/%s/search", jiraApiVersion)
@@ -308,6 +342,7 @@ func getSearchResult(baseURL url.URL, searchRequest map[string]interface{}) (*se
 		return nil, fmt.Errorf("json.Unmarshal error: %v\nresponseBody=[%v]", err, responseBody)
 	}
 
+	appHashInstance.put(cacheKey, result)
 	return &result, nil
 }
 
@@ -362,7 +397,11 @@ func search(startAt int) (*searchResult, error) {
 	}
 
 	log.Printf("search: startAt=[%v]\n", startAt)
-	result, err := getSearchResult(*baseURL, searchRequest)
+	requestBody, err := json.Marshal(searchRequest)
+	if err != nil {
+		return nil, fmt.Errorf("json.Marshal error: %v\nsearchRequest=[%v]", err, searchRequest)
+	}
+	result, err := getSearchResult(*baseURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("getSearchResult error: %v\nbaseURL=[%v], searchRequest=[%v]",
 			err, baseURL, searchResult{})
