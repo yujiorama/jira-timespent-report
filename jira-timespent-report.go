@@ -44,6 +44,10 @@ const (
         jira url (default "https://your-jira.atlassian.net")`
 )
 
+const (
+	maxWorkerSize = 10
+)
+
 var (
 	authUser       string
 	authToken      string
@@ -348,31 +352,49 @@ func getSearchResult(baseURL url.URL, requestBody []byte) (*searchResult, error)
 
 func searchCh(pages []int, issuesPerPage int) (<-chan *searchResult, <-chan error) {
 
+	startAtCh := make(chan int, 10)
 	resultCh := make(chan *searchResult, 10)
 	defer close(resultCh)
 	errorCh := make(chan error, 10)
 	defer close(errorCh)
 
-	var wg sync.WaitGroup
-	defer wg.Wait()
-	for _, page := range pages {
-		wg.Add(1)
-		startAt := (page - 1) * issuesPerPage
-
-		go func(startAt int, resultCh chan<- *searchResult, errorCh chan<- error, wg *sync.WaitGroup) {
-			defer wg.Done()
-			result, err := search(startAt)
-			if err != nil {
-				errorCh <- fmt.Errorf("search error: %v\nstartAt=[%v]", err, startAt)
-			}
-
-			if result.isNotEmpty() {
-				resultCh <- result
-			}
-		}(startAt, resultCh, errorCh, &wg)
+	if len(pages) == 0 {
+		return resultCh, errorCh
 	}
 
+	workerSize := len(pages)
+	if workerSize > maxWorkerSize {
+		workerSize = maxWorkerSize
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(workerSize)
+	for n := 0; n < workerSize; n++ {
+		go searchWorker(n, startAtCh, resultCh, errorCh, &wg)
+	}
+
+	for _, page := range pages {
+		startAtCh <- (page - 1) * issuesPerPage
+	}
+	close(startAtCh)
+	wg.Wait()
+
 	return resultCh, errorCh
+}
+
+func searchWorker(n int, startAtCh <-chan int, resultCh chan<- *searchResult, errorCh chan<- error, wg *sync.WaitGroup) {
+
+	defer wg.Done()
+	for startAt := range startAtCh {
+		result, err := search(startAt)
+		if err != nil {
+			errorCh <- fmt.Errorf("search error: %v\nn=[%v],startAt=[%v]", err, n, startAt)
+		}
+
+		if result.isNotEmpty() {
+			resultCh <- result
+		}
+	}
 }
 
 func search(startAt int) (*searchResult, error) {
