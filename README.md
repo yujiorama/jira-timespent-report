@@ -29,8 +29,20 @@ Authorization: Basic dGVzdDp0b2tlbgo=
 * Windows 10 で実行できる
 * 認証情報(ユーザーIDとAPI Token)は環境変数で指定する
 * 接続先 URL はコマンドライン引数で指定する
-* 検索条件はコマンドライン引数で指定する
+* REST API のバージョンはコマンドライン引数で指定する (初期値は `3` )
+* 1回の検索あたりの結果取得数はコマンドライン引数で指定する (初期値は `50` )
+* 作業ログを取得するかどうかはコマンドライン引数で指定する (初期値は `取得しない` )
+* 対象年月は `yyyy-MM` 形式でコマンドライン引数で指定する (初期値は前月)
+* 検索フィルターIDはコマンドライン引数で指定する
+* 検索条件のJQLはコマンドライン引数で指定する
+    * 対象年月を指定した場合
+        * 検索条件に `updated` が指定されていなければ自動的に追加する
+    * 対象年月を指定した場合
+        * 作業ログを指定した場合、検索条件に `worklogDate` が指定されていなければ自動的に追加する
+    * 検索フィルターIDを指定した場合
+        * 検索条件で指定したJQLを上書きする
 * フィールド名はコマンドライン引数で指定する
+    * 作業ログを指定した場合は固定 ( `key,started,displayName,emailAddress,timeSpentSeconds` )
 * 「初期見積もり」や「消費時間」を秒単位から変換する単位はコマンドライン引数で指定する
     - サブタスクがある Jira 課題には「Σ初期見積もり」と「Σ消費時間」の値が設定される
 * 出力形式はヘッダーありの CSV
@@ -60,10 +72,14 @@ Usage of jira-timespent-report:
         max result for pagination (default 50)
   -query string
         jira query language expression (default "status = Closed AND updated >= startOfMonth(-1) AND updated <= endOfMonth(-1)")
+  -targetym string
+        target year month(yyyy-MM)
   -unit string
         time unit format string (default "dd")
   -url string
         jira url (default "https://your-jira.atlassian.net")
+  -worklog
+        collect worklog toggle
 ```
 
 ## ライセンス
