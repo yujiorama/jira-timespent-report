@@ -1,4 +1,4 @@
-package main
+package jira
 
 import (
 	"reflect"
@@ -6,13 +6,13 @@ import (
 )
 
 func TestToRecord(t *testing.T) {
-	field := issueField{
+	field := IssueField{
 		Summary:                       "サマリ",
 		Timespent:                     3600,
 		Timeoriginalestimate:          3600,
 		Aggregatetimespent:            3600,
 		Aggregatetimeoriginalestimate: 3600,
-		Status: status{
+		Status: Status{
 			Name:        "close",
 			Description: "description",
 		},
@@ -25,7 +25,7 @@ func TestToRecord(t *testing.T) {
 		t.Errorf("expected=[%v] <> actual[%v]\n", expected, actual)
 	}
 
-	timeUnit = "hh"
+	TimeUnit = "hh"
 	expected = []string{"サマリ", "1.00"}
 	actual = field.ToRecord([]string{"summary", "timespent"})
 
