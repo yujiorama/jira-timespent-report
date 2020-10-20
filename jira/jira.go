@@ -3,6 +3,8 @@ package jira
 import (
 	"flag"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -110,6 +112,24 @@ func SetFlags() {
 	}
 }
 
+func Do() {
+	log.Println("start")
+	SetFlags()
+	issues, worklogs, searchErrors := Search()
+	for _, err := range searchErrors {
+		log.Printf("%v\n", err)
+	}
+
+	reportErrors := Report(os.Stdout, issues, worklogs)
+	if reportErrors != nil {
+		for _, err := range reportErrors {
+			log.Printf("%v\n", err)
+		}
+	}
+
+	log.Println("end")
+}
+
 func Search() (IssueSearchResults, WorklogResults, []error) {
 
 	issues, searchErrors := IssueSearch(MaxResult)
@@ -126,17 +146,23 @@ func Search() (IssueSearchResults, WorklogResults, []error) {
 	return issues, worklogs, searchErrors
 }
 
-func Report(issues IssueSearchResults, worklogs WorklogResults) []error {
+func Report(w io.Writer, issues IssueSearchResults, worklogs WorklogResults) []error {
+
+	renderErrors := make([]error, 0, 2)
 
 	if issues != nil {
-		issues.RenderCsv(Fields)
+		if err := issues.RenderCsv(w, Fields); err != nil {
+			renderErrors = append(renderErrors, err)
+		}
 	}
 
 	if worklogs != nil {
-		worklogs.RenderCsv(Fields)
+		if err := worklogs.RenderCsv(w, Fields); err != nil {
+			renderErrors = append(renderErrors, err)
+		}
 	}
 
-	return nil
+	return renderErrors
 }
 
 func IssueSearch(maxResult int) (IssueSearchResults, []error) {

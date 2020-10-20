@@ -6,11 +6,11 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -105,7 +105,7 @@ func (r *IssueSearchResult) RestPages() []int {
 	return pages
 }
 
-func (results IssueSearchResults) RenderCsv(fields []string) {
+func (results IssueSearchResults) RenderCsv(w io.Writer, fields []string) error {
 
 	fieldLabels := []string{"キー"}
 	for _, field := range fields {
@@ -115,9 +115,9 @@ func (results IssueSearchResults) RenderCsv(fields []string) {
 		}
 		fieldLabels = append(fieldLabels, label)
 	}
-	writer := csv.NewWriter(os.Stdout)
+	writer := csv.NewWriter(w)
 	if err := writer.Write(fieldLabels); err != nil {
-		log.Fatalf("writer.Write error: %v\nfieldLabels=[%v]\n", err, fieldLabels)
+		return fmt.Errorf("writer.Write error: %v\nfieldLabels=[%v]\n", err, fieldLabels)
 	}
 
 	allIssues := make(Issues, 0, 10)
@@ -131,14 +131,16 @@ func (results IssueSearchResults) RenderCsv(fields []string) {
 	for _, issue := range allIssues {
 		record := issue.ToRecord(fields)
 		if err := writer.Write(record); err != nil {
-			log.Fatalf("writer.Write error: %v\nrecord=[%v]\n", err, record)
+			return fmt.Errorf("writer.Write error: %v\nrecord=[%v]\n", err, record)
 		}
 	}
 
 	writer.Flush()
 	if err := writer.Error(); err != nil {
-		log.Fatalf("writer.Error error: %v\n", err)
+		return fmt.Errorf("writer.Error error: %v\n", err)
 	}
+
+	return nil
 }
 
 func getFilterJql(baseURL url.URL, filterID string) (string, bool) {
