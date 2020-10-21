@@ -1,12 +1,5 @@
 package jira
 
-import "sync"
-
-type appHash struct {
-	mutex *sync.Mutex
-	memo  map[string]interface{}
-}
-
 type Status struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`

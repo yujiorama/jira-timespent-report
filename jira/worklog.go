@@ -1,7 +1,6 @@
 package jira
 
 import (
-	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -48,16 +47,7 @@ func (w *WorklogField) ToRecord(fields []string) []string {
 			switch fieldName {
 			case "timespentseconds":
 				second := int(field.Int())
-				var t float32
-				switch strings.ToLower(TimeUnit) {
-				case "h", "hh":
-					t = float32(second) / float32(60*60)
-				case "d", "dd":
-					t = float32(second) / float32(60*60*HoursPerDay)
-				case "m", "mm":
-					t = float32(second) / float32(60*60*HoursPerDay*DaysPerMonth)
-				}
-				v = fmt.Sprintf("%.2f", t)
+				v = fmt.Sprintf("%.2f", config.WithTimeUnit(second))
 			default:
 				switch field.Kind() {
 				case reflect.String:
@@ -129,17 +119,19 @@ func (results WorklogResults) RenderCsv(w io.Writer, fields []string) error {
 	return nil
 }
 
-func getWorklogResult(baseURL url.URL, key string, queryParams url.Values) (*WorklogResult, error) {
+func getWorklogResult(key string, queryParams url.Values) (*WorklogResult, error) {
 
-	worklogURL := baseURL
-	worklogURL.Path = fmt.Sprintf("/rest/api/%s/issue/%s/worklog", ApiVersion, key)
-	worklogURL.RawQuery = queryParams.Encode()
+	worklogURL, err := config.WorklogURL(key, queryParams)
+	if err != nil {
+		return nil, fmt.Errorf("config.WorklogURL error: %v\nkey=[%v], queryParams=[%v]", err, key, queryParams)
+	}
+
 	req, err := http.NewRequest("GET", worklogURL.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("http.NewRequest error: %v\nworklogURL=[%v]", err, worklogURL)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Basic %s", base64.URLEncoding.EncodeToString([]byte(AuthUser+":"+AuthToken))))
+	req.Header.Set("Authorization", config.basicAuthorization())
 	req.Header.Set("Accept", "application/json")
 
 	client := &http.Client{}
@@ -221,29 +213,16 @@ func worklogWorker(n int, keyCh <-chan string, resultCh chan<- *WorklogResult, e
 
 func worklog(key string) (*WorklogResult, error) {
 
-	baseURL, err := url.Parse(BaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("url.Parse error: %v\njiraURL=[%v]", err, BaseURL)
-	}
-
 	queryParams := url.Values{
-		"startAt":    []string{"0"},
-		"maxResults": []string{"1048576"},
-		"startedAfter": []string{func() string {
-			t := time.Now().AddDate(0, -1, 0)
-			if len(TargetYearMonth) > 0 {
-				if v, err := time.Parse("2006-01-02", TargetYearMonth+"-01"); err == nil {
-					t = v
-				}
-			}
-			return startOfMonthEpocMillis(t)
-		}()},
+		"startAt":      []string{"0"},
+		"maxResults":   []string{"1048576"},
+		"startedAfter": []string{config.StartedAfter()},
 	}
 
-	result, err := getWorklogResult(*baseURL, key, queryParams)
+	result, err := getWorklogResult(key, queryParams)
 	if err != nil {
-		return nil, fmt.Errorf("getWorklogResult error: %v\nbaseURL=[%v], key=[%v], queryParams=[%v]",
-			err, baseURL, key, queryParams)
+		return nil, fmt.Errorf("getWorklogResult error: %v\nkey=[%v], queryParams=[%v]",
+			err, key, queryParams)
 	}
 
 	if result.IsNotEmpty() {

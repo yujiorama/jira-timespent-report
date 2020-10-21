@@ -1,9 +1,9 @@
 package main
 
 import (
-	"bitbucket.org/yujiorama/jira-timespent-report/jira"
+	"bitbucket.org/yujiorama/jira-timespent-report/cmd/cli"
 )
 
 func main() {
-	jira.Do()
+	cli.Do()
 }

@@ -2,7 +2,6 @@ package jira
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -10,12 +9,10 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/url"
 	"reflect"
 	"sort"
 	"strings"
 	"sync"
-	"time"
 )
 
 func (a Issues) Len() int {
@@ -55,20 +52,9 @@ func (f *IssueField) ToRecord(fields []string) []string {
 			switch fieldName {
 			case "timespent", "timeoriginalestimate", "aggregatetimespent", "aggregatetimeoriginalestimate":
 				second := int(field.Int())
-				var t float32
-				switch strings.ToLower(TimeUnit) {
-				case "h", "hh":
-					t = float32(second) / float32(60*60)
-				case "d", "dd":
-					t = float32(second) / float32(60*60*HoursPerDay)
-				case "m", "mm":
-					t = float32(second) / float32(60*60*HoursPerDay*DaysPerMonth)
-				}
-				v = fmt.Sprintf("%.2f", t)
-
+				v = fmt.Sprintf("%.2f", config.WithTimeUnit(second))
 			case "status":
 				v = f.Status.Name
-
 			default:
 				switch field.Kind() {
 				case reflect.String:
@@ -143,23 +129,27 @@ func (results IssueSearchResults) RenderCsv(w io.Writer, fields []string) error 
 	return nil
 }
 
-func getFilterJql(baseURL url.URL, filterID string) (string, bool) {
+func getFilterJql(filterID string) (string, bool) {
 
 	cacheKey := fmt.Sprintf("getFilterJql_%s", filterID)
-	if v, ok := appHashInstance.get(cacheKey); ok {
+	if v, ok := cache.get(cacheKey); ok {
 		log.Printf("cache hit: key=[%s], v=[%v]\n", cacheKey, v)
 		return v.(string), true
 	}
 
-	filterURL := baseURL
-	filterURL.Path = fmt.Sprintf("/rest/api/%s/filter/%s", ApiVersion, filterID)
+	filterURL, err := config.FilterURL(filterID)
+	if err != nil {
+		log.Printf("config.FilterURL error: %v\nfilterID=[%v]\n", err, filterID)
+		return "", false
+	}
+
 	req, err := http.NewRequest("GET", filterURL.String(), nil)
 	if err != nil {
 		log.Printf("http.NewRequest error: %v\nfilterURL=[%v]\n", err, filterURL)
 		return "", false
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Basic %s", base64.URLEncoding.EncodeToString([]byte(AuthUser+":"+AuthToken))))
+	req.Header.Set("Authorization", fmt.Sprintf(config.basicAuthorization()))
 	req.Header.Set("Accept", "application/json")
 
 	client := &http.Client{}
@@ -183,27 +173,31 @@ func getFilterJql(baseURL url.URL, filterID string) (string, bool) {
 		return "", false
 	}
 
-	appHashInstance.put(cacheKey, result.Jql)
+	cache.put(cacheKey, result.Jql)
 	return result.Jql, true
 }
 
-func getSearchResult(baseURL url.URL, requestBody []byte) (*IssueSearchResult, error) {
+func getSearchResult(requestBody []byte) (*IssueSearchResult, error) {
 
 	cacheKey := fmt.Sprintf("getSearchResult_%s", string(requestBody))
-	if v, ok := appHashInstance.get(cacheKey); ok {
+	if v, ok := cache.get(cacheKey); ok {
 		log.Printf("cache hit: key=[%s], v=[%v]\n", cacheKey, v)
 		result := v.(IssueSearchResult)
 		return &result, nil
 	}
-	searchURL := baseURL
-	searchURL.Path = fmt.Sprintf("/rest/api/%s/search", ApiVersion)
+
+	searchURL, err := config.SearchURL()
+	if err != nil {
+		return nil, fmt.Errorf("config.SearchURL error: %v", err)
+	}
+
 	req, err := http.NewRequest("POST", searchURL.String(), bytes.NewBuffer(requestBody))
 	if err != nil {
 		return nil, fmt.Errorf("http.NewRequest error: %v\nsearchURL=[%v],requestBody=[%v]",
 			err, searchURL, requestBody)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Basic %s", base64.URLEncoding.EncodeToString([]byte(AuthUser+":"+AuthToken))))
+	req.Header.Set("Authorization", config.basicAuthorization())
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
@@ -223,7 +217,7 @@ func getSearchResult(baseURL url.URL, requestBody []byte) (*IssueSearchResult, e
 		return nil, fmt.Errorf("json.Unmarshal error: %v\nresponseBody=[%v]", err, responseBody)
 	}
 
-	appHashInstance.put(cacheKey, result)
+	cache.put(cacheKey, result)
 	return &result, nil
 }
 
@@ -276,26 +270,21 @@ func searchWorker(n int, wg *sync.WaitGroup, startAtCh <-chan int, resultCh chan
 
 func search(startAt int) (*IssueSearchResult, error) {
 
-	baseURL, err := url.Parse(BaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("url.Parse error: %v\njiraURL=[%v]", err, BaseURL)
-	}
-
 	searchRequest := map[string]interface{}{
-		"fields":     Fields,
+		"fields":     config.fields(),
 		"startAt":    startAt,
-		"maxResults": MaxResult,
+		"maxResults": config.MaxResult,
 	}
-	if len(Query) > 0 {
-		searchRequest["jql"] = Query
+	if len(config.Query) > 0 {
+		searchRequest["jql"] = config.Query
 	}
-	if len(TargetYearMonth) > 0 {
-		if dateCondition, ok := dateCondition(TargetYearMonth, Worklog); ok {
+	if len(config.TargetYearMonth) > 0 {
+		if dateCondition, ok := config.dateCondition(); ok {
 			searchRequest["jql"] = composeJql(searchRequest["jql"].(string), dateCondition)
 		}
 	}
-	if len(Filter) > 0 {
-		if filterQuery, ok := getFilterJql(*baseURL, Filter); ok {
+	if len(config.Filter) > 0 {
+		if filterQuery, ok := getFilterJql(config.Filter); ok {
 			searchRequest["jql"] = filterQuery
 		}
 	}
@@ -305,10 +294,9 @@ func search(startAt int) (*IssueSearchResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("json.Marshal error: %v\nsearchRequest=[%v]", err, searchRequest)
 	}
-	result, err := getSearchResult(*baseURL, requestBody)
+	result, err := getSearchResult(requestBody)
 	if err != nil {
-		return nil, fmt.Errorf("getSearchResult error: %v\nbaseURL=[%v], requestBody=[%v]",
-			err, baseURL, string(requestBody))
+		return nil, fmt.Errorf("getSearchResult error: %v\nrequestBody=[%v]", err, string(requestBody))
 	}
 
 	if result.IsNotEmpty() {
@@ -316,22 +304,6 @@ func search(startAt int) (*IssueSearchResult, error) {
 	}
 
 	return nil, fmt.Errorf("empty result")
-}
-
-func dateCondition(yearMonth string, worklog bool) (string, bool) {
-
-	t, err := time.Parse("2006-01-02", yearMonth+"-01")
-	if err != nil {
-		return "", false
-	}
-
-	offset := int(t.Month() - time.Now().Month())
-
-	if worklog {
-		return fmt.Sprintf("worklogDate >= startOfMonth(%d) AND worklogDate <= endOfMonth(%d)", offset, offset), true
-	}
-
-	return fmt.Sprintf("updated >= startOfMonth(%d) AND updated <= endOfMonth(%d)", offset, offset), true
 }
 
 func composeJql(baseQuery string, condition string) string {
