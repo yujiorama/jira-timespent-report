@@ -88,13 +88,13 @@ func init() {
 	flag.IntVar(&DaysPerMonth, "days", defaultDaysPerMonth, "work days per month")
 	flag.BoolVar(&Worklog, "worklog", false, "collect worklog toggle")
 	flag.StringVar(&TargetYearMonth, "targetym", "", "target year month(yyyy-MM)")
+	flag.Usage = func() {
+		fmt.Println(usageText)
+	}
 }
 
 func SetFlags() {
 	flag.Parse()
-	flag.Usage = func() {
-		fmt.Println(usageText)
-	}
 	Fields = strings.Split(FieldNames, ",")
 	if Worklog {
 		Fields = []string{
