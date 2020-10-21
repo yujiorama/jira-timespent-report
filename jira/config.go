@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -69,6 +70,45 @@ var (
 		"timespentseconds":              "消費時間",
 	}
 )
+
+func (c *Config) SetQueryParams(queryParams url.Values) {
+
+	for key, vs := range queryParams {
+		if len(vs) == 0 {
+			continue
+		}
+		value := vs[0]
+
+		switch strings.ToLower(key) {
+		case "baseurl":
+			c.BaseURL = value
+		case "query":
+			c.Query = value
+		case "filter":
+			c.Filter = value
+		case "fieldnames":
+			c.FieldNames = value
+		case "maxresult":
+			i, _ := strconv.Atoi(value)
+			c.MaxResult = i
+		case "apiversion":
+			c.ApiVersion = value
+		case "timeunit":
+			c.TimeUnit = value
+		case "hoursperday":
+			i, _ := strconv.Atoi(value)
+			c.HoursPerDay = i
+		case "dayspermonth":
+			i, _ := strconv.Atoi(value)
+			c.DaysPerMonth = i
+		case "worklog":
+			b, _ := strconv.ParseBool(value)
+			c.Worklog = b
+		case "targetyearmonth":
+			c.TargetYearMonth = value
+		}
+	}
+}
 
 func (c *Config) fields() []string {
 

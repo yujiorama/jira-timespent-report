@@ -8,7 +8,7 @@ import (
 
 func Do() {
 	log.Println("start")
-	jira.SetFlags()
+
 	issues, worklogs, searchErrors := jira.Search()
 	for _, err := range searchErrors {
 		log.Printf("%v\n", err)

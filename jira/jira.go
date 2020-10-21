@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 )
 
 func init() {
@@ -29,6 +30,11 @@ func SetFlags() {
 	if err := config.checkAuthEnv(); err != nil {
 		panic(err)
 	}
+}
+
+func SetQueryParams(queryParams url.Values) {
+
+	config.SetQueryParams(queryParams)
 }
 
 func Search() (IssueSearchResults, WorklogResults, []error) {

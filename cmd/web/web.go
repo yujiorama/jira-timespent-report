@@ -1,42 +1,44 @@
-package main
+package web
 
 import (
 	"bitbucket.org/yujiorama/jira-timespent-report/jira"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 )
 
 const (
 	DefaultHost = "localhost"
-	DefaultPort = "8080"
+	DefaultPort = 8080
 )
 
-func main() {
+var (
+	serverEnable bool
+	host         string
+	port         int
+)
 
+func init() {
+	flag.BoolVar(&serverEnable, "server", false, "server mode")
+	flag.StringVar(&host, "host", DefaultHost, "request host")
+	flag.IntVar(&port, "port", DefaultPort, "request port")
+}
+
+func CanDo() bool {
+
+	return serverEnable
+}
+
+func Do() {
 	log.Println("start")
-	jira.SetFlags()
-
-	serverHost := DefaultHost
-	if v, ok := os.LookupEnv("SERVER_HOST"); ok {
-		if len(v) > 0 {
-			serverHost = v
-		}
-	}
-	serverPort := DefaultPort
-	if v, ok := os.LookupEnv("SERVER_PORT"); ok {
-		if len(v) > 0 {
-			serverPort = v
-		}
-	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/report", reportHandler)
 
 	s := &http.Server{
-		Addr:    serverHost + ":" + serverPort,
+		Addr:    fmt.Sprintf("%s:%d", host, port),
 		Handler: mux,
 	}
 
@@ -70,6 +72,8 @@ func handleError(responseBody *errorResponse, w http.ResponseWriter) {
 }
 
 func reportHandler(w http.ResponseWriter, r *http.Request) {
+
+	jira.SetQueryParams(r.URL.Query())
 
 	issues, worklogs, searchErrors := jira.Search()
 	if searchErrors != nil && len(searchErrors) > 0 {
