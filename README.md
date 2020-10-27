@@ -55,9 +55,39 @@ go get bitbucket.org/yujiorama/jira-timespent-report
 
 ## 使い方
 
+### CLI
+
+コマンドとして実行、CSV 形式で標準出力へ出力する。
+
+```bash
+$ AUTH_USER=yyyy AUTH_TOKEN=aaaabbbb jira-timespent-report -url https://your-jira.atlassian.net -maxresult 10 -unit dd -query "status = Closed" -targetym 2020-08
+```
+
+### Web
+
+HTTP サーバーとして実行、CSV 形式でダウンロードする。
+
+```bash
+$ AUTH_USER=yyyy AUTH_TOKEN=aaaabbbb jira-timespent-report -server &
+$ curl localhost:8080/?url=https://your-jira.atlassian.net&maxresult=10&unit=dd&query=status+%%3DClosed&targetym=2020-08
+```
+
+### オプションの説明
+
 ```bash
 $ jira-timespent-report -h
-Usage of jira-timespent-report:
+Usage of jira-timespent-report (v0.0.9):
+  $ jira-timespent-report [options]
+
+Example:
+  # get csv report by cli
+  $ AUTH_USER=yyyy AUTH_TOKEN=aaaabbbb jira-timespent-report -url https://your-jira.atlassian.net -maxresult 10 -unit dd -query "status = Closed" -targetym 2020-08
+
+  # get csv report by http server
+  $ AUTH_USER=yyyy AUTH_TOKEN=aaaabbbb jira-timespent-report -server &
+  $ curl localhost:8080/report?url=https://your-jira.atlassian.net&maxresult=10&unit=dd&query=status+%3DClosed&targetym=2020-08
+
+Options:
   -api string
         number of API Version of Jira REST API (default "3")
   -days int
@@ -66,12 +96,18 @@ Usage of jira-timespent-report:
         fields of jira issue (default "summary,status,timespent,timeoriginalestimate,aggregatetimespent,aggregatetimeoriginalestimate")
   -filter string
         jira search filter id
+  -host string
+        request host (default "localhost")
   -hours int
         work hours per day (default 8)
   -maxresult int
         max result for pagination (default 50)
+  -port int
+        request port (default 8080)
   -query string
         jira query language expression (default "status = Closed AND updated >= startOfMonth(-1) AND updated <= endOfMonth(-1)")
+  -server
+        server mode
   -targetym string
         target year month(yyyy-MM)
   -unit string

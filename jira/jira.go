@@ -9,7 +9,8 @@ import (
 
 func init() {
 	flag.Usage = func() {
-		fmt.Println(usageText)
+		fmt.Printf(usageText, version)
+		flag.PrintDefaults()
 	}
 	flag.StringVar(&config.BaseURL, "url", "https://your-jira.atlassian.net", "jira url")
 	flag.StringVar(&config.Query, "query", "status = Closed AND updated >= startOfMonth(-1) AND updated <= endOfMonth(-1)", "jira query language expression")

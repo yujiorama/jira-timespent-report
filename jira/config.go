@@ -30,29 +30,19 @@ const (
 	defaultHoursPerDay        = 8
 	defaultDaysPerMonth       = 24
 	defaultJiraRestApiVersion = "3"
-	usageText                 = `Usage of jira-timespent-report:
-  -api string
-        number of API Version of Jira REST API (default "3")
-  -days int
-        work days per month (default 24)
-  -fields string
-        fields of jira issue (default "summary,status,timespent,timeoriginalestimate,aggregatetimespent,aggregatetimeoriginalestimate")
-  -filter string
-        jira search filter id
-  -hours int
-        work hours per day (default 8)
-  -maxresult int
-        max result for pagination (default 50)
-  -query string
-        jira query language expression (default "status = Closed AND updated >= startOfMonth(-1) AND updated <= endOfMonth(-1)")
-  -targetym string
-        target year month(yyyy-MM)
-  -unit string
-        time unit format string (default "dd")
-  -url string
-        jira url (default "https://your-jira.atlassian.net")
-  -worklog
-        collect worklog toggle`
+	usageText                 = `Usage of jira-timespent-report (v%s):
+  $ jira-timespent-report [options]
+
+Example:
+  # get csv report by cli
+  $ AUTH_USER=yyyy AUTH_TOKEN=aaaabbbb jira-timespent-report -url https://your-jira.atlassian.net -maxresult 10 -unit dd -query "status = Closed" -targetym 2020-08
+
+  # get csv report by http server
+  $ AUTH_USER=yyyy AUTH_TOKEN=aaaabbbb jira-timespent-report -server &
+  $ curl localhost:8080/?url=https://your-jira.atlassian.net&maxresult=10&unit=dd&query=status+%%3DClosed&targetym=2020-08
+
+Options:
+`
 )
 
 var (

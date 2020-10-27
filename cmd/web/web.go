@@ -35,7 +35,7 @@ func Do() {
 	log.Println("start")
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/report", reportHandler)
+	mux.HandleFunc("/", reportHandler)
 
 	s := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", host, port),
