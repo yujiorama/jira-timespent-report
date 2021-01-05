@@ -173,36 +173,36 @@ func (c *Config) dateCondition() (string, bool) {
 
 func (c *Config) FilterURL(filterID string) (*url.URL, error) {
 
-	u, err := url.Parse(config.BaseURL)
+	u, err := url.Parse(c.BaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("url.Parse error: %v\nBaseURL=[%v]", err, config.BaseURL)
+		return nil, fmt.Errorf("url.Parse error: %v\nBaseURL=[%v]", err, c.BaseURL)
 	}
 
-	u.Path = fmt.Sprintf("/rest/api/%s/filter/%s", config.ApiVersion, filterID)
+	u.Path = fmt.Sprintf("/rest/api/%s/filter/%s", c.ApiVersion, filterID)
 
 	return u, nil
 }
 
 func (c *Config) SearchURL() (*url.URL, error) {
 
-	u, err := url.Parse(config.BaseURL)
+	u, err := url.Parse(c.BaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("url.Parse error: %v\nBaseURL=[%v]", err, config.BaseURL)
+		return nil, fmt.Errorf("url.Parse error: %v\nBaseURL=[%v]", err, c.BaseURL)
 	}
 
-	u.Path = fmt.Sprintf("/rest/api/%s/search", config.ApiVersion)
+	u.Path = fmt.Sprintf("/rest/api/%s/search", c.ApiVersion)
 
 	return u, nil
 }
 
 func (c *Config) WorklogURL(key string, queryParams url.Values) (*url.URL, error) {
 
-	u, err := url.Parse(config.BaseURL)
+	u, err := url.Parse(c.BaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("url.Parse error: %v\nBaseURL=[%v]", err, config.BaseURL)
+		return nil, fmt.Errorf("url.Parse error: %v\nBaseURL=[%v]", err, c.BaseURL)
 	}
 
-	u.Path = fmt.Sprintf("/rest/api/%s/issue/%s/worklog", config.ApiVersion, key)
+	u.Path = fmt.Sprintf("/rest/api/%s/issue/%s/worklog", c.ApiVersion, key)
 	u.RawQuery = queryParams.Encode()
 
 	return u, nil
@@ -210,13 +210,13 @@ func (c *Config) WorklogURL(key string, queryParams url.Values) (*url.URL, error
 
 func (c *Config) WithTimeUnit(second int) float32 {
 
-	switch strings.ToLower(config.TimeUnit) {
+	switch strings.ToLower(c.TimeUnit) {
 	case "h", "hh":
 		return float32(second) / float32(60*60)
 	case "d", "dd":
-		return float32(second) / float32(60*60*config.HoursPerDay)
+		return float32(second) / float32(60*60*c.HoursPerDay)
 	case "m", "mm":
-		return float32(second) / float32(60*60*config.HoursPerDay*config.DaysPerMonth)
+		return float32(second) / float32(60*60*c.HoursPerDay*c.DaysPerMonth)
 	default:
 		return 0.0
 	}
@@ -224,8 +224,8 @@ func (c *Config) WithTimeUnit(second int) float32 {
 
 func (c *Config) TargetMonth() (*time.Time, error) {
 
-	if len(config.TargetYearMonth) > 0 {
-		t, err := time.Parse("2006-01-02", config.TargetYearMonth+"-01")
+	if len(c.TargetYearMonth) > 0 {
+		t, err := time.Parse("2006-01-02", c.TargetYearMonth+"-01")
 		if err != nil {
 			return nil, fmt.Errorf("TargetMonth: error %v", err)
 		}
