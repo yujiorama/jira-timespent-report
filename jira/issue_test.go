@@ -25,7 +25,7 @@ func TestToRecord(t *testing.T) {
 		t.Errorf("expected=[%v] <> actual[%v]\n", expected, actual)
 	}
 
-	TimeUnit = "hh"
+	config.TimeUnit = "hh"
 	expected = []string{"サマリ", "1.00"}
 	actual = field.ToRecord([]string{"summary", "timespent"})
 

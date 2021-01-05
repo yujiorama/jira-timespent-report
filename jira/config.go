@@ -22,6 +22,7 @@ type Config struct {
 	DaysPerMonth    int
 	Worklog         bool
 	TargetYearMonth string
+	clock           func() time.Time
 }
 
 const (
@@ -46,7 +47,7 @@ Options:
 )
 
 var (
-	config           = &Config{}
+	config           = &Config{clock: time.Now}
 	defaultFieldText = map[string]string{
 		"summary":                       "概要",
 		"status":                        "ステータス",
@@ -140,14 +141,30 @@ func (c *Config) basicAuthorization() string {
 
 func (c *Config) dateCondition() (string, bool) {
 
-	t, err := time.Parse("2006-01-02", config.TargetYearMonth+"-01")
+	targetTime, err := time.Parse("2006-01-02", c.TargetYearMonth+"-01")
 	if err != nil {
 		return "", false
 	}
+	currentTime := c.clock()
 
-	offset := int(t.Month() - time.Now().Month())
+	if targetTime.Year() > currentTime.Year() {
+		return "", false
+	}
 
-	if config.Worklog {
+	offset := 0
+	if targetTime.Year() == currentTime.Year() {
+		if targetTime.Month() > currentTime.Month() {
+			return "", false
+		}
+		offset = int(targetTime.Month() - currentTime.Month())
+
+	} else {
+		monthDiff := 12 - int(targetTime.Month()) + int(currentTime.Month())
+		yearDiff := (currentTime.Year() - targetTime.Year() - 1) * 12
+		offset = -monthDiff - yearDiff
+	}
+
+	if c.Worklog {
 		return fmt.Sprintf("worklogDate >= startOfMonth(%d) AND worklogDate <= endOfMonth(%d)", offset, offset), true
 	}
 
