@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 )
 
 func (a Worklogs) Len() int {
@@ -98,9 +97,7 @@ func (results WorklogResults) RenderCsv(w io.Writer, fields []string) error {
 
 	allWorklogs := make(Worklogs, 0, 10)
 	for _, result := range results {
-		for _, worklog := range result.Worklogs {
-			allWorklogs = append(allWorklogs, worklog)
-		}
+		allWorklogs = append(allWorklogs, result.Worklogs...)
 	}
 	sort.Sort(allWorklogs)
 
@@ -230,9 +227,4 @@ func worklog(key string) (*WorklogResult, error) {
 	}
 
 	return nil, fmt.Errorf("empty result")
-}
-
-func startOfMonthEpocMillis(t time.Time) string {
-	startOfMonth := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
-	return fmt.Sprintf("%d", startOfMonth.UnixNano()/int64(time.Millisecond))
 }

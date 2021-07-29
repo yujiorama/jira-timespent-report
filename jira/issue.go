@@ -33,9 +33,7 @@ func (a Issues) Less(i, j int) bool {
 func (i *Issue) ToRecord(fields []string) []string {
 
 	result := []string{i.Key}
-	for _, x := range i.Fields.ToRecord(fields) {
-		result = append(result, x)
-	}
+	result = append(result, i.Fields.ToRecord(fields)...)
 	return result
 }
 
@@ -108,9 +106,7 @@ func (results IssueSearchResults) RenderCsv(w io.Writer, fields []string) error 
 
 	allIssues := make(Issues, 0, 10)
 	for _, result := range results {
-		for _, issue := range result.Issues {
-			allIssues = append(allIssues, issue)
-		}
+		allIssues = append(allIssues, result.Issues...)
 	}
 	sort.Sort(allIssues)
 
@@ -149,7 +145,7 @@ func getFilterJql(filterID string) (string, bool) {
 		return "", false
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf(config.basicAuthorization()))
+	req.Header.Set("Authorization", config.basicAuthorization())
 	req.Header.Set("Accept", "application/json")
 
 	client := &http.Client{}

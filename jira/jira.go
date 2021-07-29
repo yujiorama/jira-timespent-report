@@ -47,9 +47,7 @@ func Search() (IssueSearchResults, WorklogResults, []error) {
 	}
 
 	worklogs, worklogErrors := WorklogSearch(issues)
-	for _, err := range worklogErrors {
-		searchErrors = append(searchErrors, err)
-	}
+	searchErrors = append(searchErrors, worklogErrors...)
 
 	return issues, worklogs, searchErrors
 }

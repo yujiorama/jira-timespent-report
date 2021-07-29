@@ -1,7 +1,6 @@
 package web
 
 import (
-	"bitbucket.org/yujiorama/jira-timespent-report/jira"
 	"context"
 	"encoding/json"
 	"flag"
@@ -13,6 +12,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"bitbucket.org/yujiorama/jira-timespent-report/jira"
 )
 
 const (
@@ -79,7 +80,6 @@ func Do() {
 	log.Printf("end\n")
 
 	defer os.Exit(0)
-	return
 }
 
 type errorResponse struct {
@@ -107,7 +107,7 @@ func reportHandler(w http.ResponseWriter, r *http.Request) {
 	jira.SetQueryParams(r.URL.Query())
 
 	issues, worklogs, searchErrors := jira.Search()
-	if searchErrors != nil && len(searchErrors) > 0 {
+	if len(searchErrors) > 0 {
 		message := make([]string, 0, 10)
 		for _, err := range searchErrors {
 			log.Printf("%v\n", err)
@@ -123,9 +123,7 @@ func reportHandler(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Content-Type", "text/csv")
 	reportErrors := jira.Report(w, issues, worklogs)
-	if reportErrors != nil {
-		for _, err := range reportErrors {
-			log.Printf("%v\n", err)
-		}
+	for _, err := range reportErrors {
+		log.Printf("%v\n", err)
 	}
 }
